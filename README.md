@@ -1,5 +1,7 @@
 # safenow-extended-jwt
 
+* The Goal of this project is to make it easy for developers to create an extended JWT which does not expire as soon as the default JWT expiry.
+
 This project uses Quarkus, the Supersonic Subatomic Java Framework.
 
 If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.

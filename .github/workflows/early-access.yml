@@ -1,0 +1,93 @@
+name: EarlyAccess
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  GRAAL_VERSION: '21'
+  JAVA_VERSION: '21'
+  JAVA_DISTRO: 'temurin'
+
+jobs:
+  precheck:
+    if: startsWith(github.event.head_commit.message, '🏁 Releasing version') != true && startsWith(github.event.head_commit.message, '⬆️  Next version') != true
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.vars.outputs.VERSION }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: n1hility/cancel-previous-runs@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRO }}
+          cache: gradle
+
+      - name: Version
+        id: vars
+        shell: bash
+        run: |
+          version=$(./gradlew -q version)
+          echo "VERSION=$(echo $version)" >>$GITHUB_OUTPUT
+
+  # Build native executable per runner
+  build:
+    needs: [ precheck ]
+    if: endsWith(${{ needs.precheck.outputs.VERSION }}, '-SNAPSHOT')
+    name: 'Build with Graal on ${{ matrix.os }}'
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ ubuntu-latest, macOS-latest, windows-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: 'Check out repository'
+        uses: actions/checkout@v3
+    
+      - name: 'Set up Graal'
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: 21
+          components: 'native-image'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 'Build Native Image'
+        run: ./gradlew build -Dquarkus.native.enabled=true
+
+      - name: 'Upload build artifact'
+        uses: actions/upload-artifact@v3
+        with:
+          name: artifacts
+          path: build/safenow-extended-jwt-*-runner
+
+  # Collect all executables and release
+  release:
+    needs: [ build ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Check out repository'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 'Download all build artifacts'
+        uses: actions/download-artifact@v4
+
+      - name: 'Set up Java'
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRO }}
+          cache: gradle
+
+      - name: 'Release with JReleaser'
+        env:
+          JRELEASER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew jReleaserFullRelease
